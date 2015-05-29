@@ -454,6 +454,36 @@ class Data:
             writer.writerow([aid, pid] + authorSimilarity + paperSimilarity + [-1,])
 
 
+  @runtime
+  def readValid(self, csvFile='Valid.csv', pickleFile='._valid.dat'):
+    with open(self.dataDir + csvFile, 'rb') as csvFile:
+      reader = csv.reader(csvFile)
+      reader.next()  # pass column name
+
+      with open(self.dataDir + 'valid_preprocess.csv', 'wb') as csvOut:
+        writer = csv.writer(csvOut, delimiter=',')
+        writer.writerow(['AuthorId','PaperId','AffiliationSimilarity','ConferenceCountSimilairty', \
+                         'JournalCountSimilairty','TitleSimilairty','PublishSimilarity','KeywordSimilairty','mark'])
+
+        for row in reader:
+          aid = int(row[0])
+          confirmed = row[1].split()
+          deleted  = row[2].split()
+
+          authorInfo = self.getAuthorInfo(aid)
+          publicationInfo = self.getPublicationsInfo(aid)
+
+          pid = int(pid)
+          print '[+]', aid, pid, '?'
+          coauthorInfo = self.getCoAuthorsInfo(aid, pid)
+          authorSimilarity = coauthorCmp(authorInfo, coauthorInfo)
+
+          paperInfo = self.getPaperInfo(pid)
+          paperSimilarity = publicationCmp(paperInfo, publicationInfo)
+
+          writer.writerow([aid, pid] + authorSimilarity + paperSimilarity + [0,])
+
+
   def getAuthorInfo(self, aid):
     """
     Return co-author information. Called by getCoAuthorInfo
@@ -550,6 +580,9 @@ def main():
 
   print '[*] Start to read Train.csv'
   data.readTrain()
+
+  print '[*] Start to read Valid.csv'
+  data.readValid()
 
 if __name__ == "__main__":
   main()
