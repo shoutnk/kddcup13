@@ -421,7 +421,8 @@ class Data:
 
       with open(self.dataDir + 'preprocess.csv', 'wb') as csvOut:
         writer = csv.writer(csvOut, delimiter=',')
-        writer.writerow(['AuthorId','PaperId','AuthorSimilarity','PublicationSimilarity','mark'])
+        writer.writerow(['AuthorId','PaperId','AffiliationSimilarity','ConferenceCountSimilairty', \
+                         'JournalCountSimilairty','TitleSimilairty','PublishSimilarity','KeywordSimilairty','mark'])
 
         for row in reader:
           aid = int(row[0])
@@ -467,21 +468,21 @@ class Data:
 
         for row in reader:
           aid = int(row[0])
-          confirmed = row[1].split()
-          deleted  = row[2].split()
+          pids = row[1].split()
 
           authorInfo = self.getAuthorInfo(aid)
           publicationInfo = self.getPublicationsInfo(aid)
 
-          pid = int(pid)
-          print '[+]', aid, pid, '?'
-          coauthorInfo = self.getCoAuthorsInfo(aid, pid)
-          authorSimilarity = coauthorCmp(authorInfo, coauthorInfo)
+          for pid in pids:
+            pid = int(pid)
+            print '[+]', aid, pid, '?'
+            coauthorInfo = self.getCoAuthorsInfo(aid, pid)
+            authorSimilarity = coauthorCmp(authorInfo, coauthorInfo)
 
-          paperInfo = self.getPaperInfo(pid)
-          paperSimilarity = publicationCmp(paperInfo, publicationInfo)
+            paperInfo = self.getPaperInfo(pid)
+            paperSimilarity = publicationCmp(paperInfo, publicationInfo)
 
-          writer.writerow([aid, pid] + authorSimilarity + paperSimilarity + [0,])
+            writer.writerow([aid, pid] + authorSimilarity + paperSimilarity + [0,])
 
 
   def getAuthorInfo(self, aid):
