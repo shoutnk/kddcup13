@@ -165,9 +165,9 @@ class Data:
     if not os.path.exists(self.dataDir):
       os.makedirs(self.dataDir)
     if not os.path.exists(self.pickleDir):
-      os.makedirs(self.dataDir)
+      os.makedirs(self.pickleDir)
     if not os.path.exists(self.resultDir):
-      os.makedirs(self.dataDir)
+      os.makedirs(self.resultDir)
 
     # Author.csv
     self.authorAffiliation = {}  # authorId -> authorAffiliation
