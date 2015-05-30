@@ -1,4 +1,5 @@
-import csv, re, os, math, operator, jellyfish
+import csv, os, datetime
+import re, math, operator, jellyfish
 from nltk.corpus import stopwords
 import threading, pickle
 
@@ -66,16 +67,16 @@ def coauthorCmp(author, coauthors):
   Return mean of distance between each co-author
   """
   mean = [0.0, 0.0, 0.0]
-  cnt = 0
+  cnt = [0, 0, 0]
   for coauthor in coauthors:
     ret = authorCmp(author, coauthor)
     mean = map(operator.add, mean, ret)
-    cnt += 1
 
-  if cnt > 0:
-    return [i / cnt for i in mean]
-  else:
-    return mean
+    for i in range(0, 3):
+      if ret[i] > 0:
+        cnt[i] += 1
+
+  return [mean[i] / cnt[i] if cnt[i] > 0 else 0 for i in range(0, 3)]
 
 
 def paperCmp(paper1, paper2):
@@ -141,22 +142,32 @@ def publicationCmp(paper, publications):
   Return mean of distance between each co-author
   """
   mean = [0.0, 0.0, 0.0]
-  cnt = 0
+  cnt = [0, 0, 0]
   for publication in publications:
     if paper[0] != publication[0]:
       ret = paperCmp(paper, publication)
       mean = map(operator.add, mean, ret)
-      cnt += 1
 
-  if cnt > 0:
-    return [i / cnt for i in mean]
-  else:
-    return mean
+      for i in range(0, 3):
+        if ret[i] > 0:
+          cnt[i] += 1
+
+  return [mean[i] / cnt[i] if cnt[i] > 0 else 0 for i in range(0, 3)]
 
 
 class Data:
   def __init__ (self, run_dir):
     self.dataDir = run_dir + '/original_data/'
+    self.pickleDir = run_dir + '/pickles/'
+    self.resultDir = run_dir + '/preprocess/'
+    self.currentTime = str(datetime.datetime.now())
+
+    if not os.path.exists(self.dataDir):
+      os.makedirs(self.dataDir)
+    if not os.path.exists(self.pickleDir):
+      os.makedirs(self.dataDir)
+    if not os.path.exists(self.resultDir):
+      os.makedirs(self.dataDir)
 
     # Author.csv
     self.authorAffiliation = {}  # authorId -> authorAffiliation
@@ -186,12 +197,12 @@ class Data:
 
 
   @runtime
-  def readAuthor(self, csvFile='Author.csv', pickleFile='._author.dat'):
+  def readAuthor(self, csvFile='Author.csv', pickleFile='author.dat'):
     """
     AuthorId, Affiliation
     """
-    if os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "rb") as f:
+    if os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "rb") as f:
         self.authorAffiliation = pickle.load(f)
 
         print ' # Load %s instead of parsing %s' % (pickleFile, csvFile)
@@ -212,18 +223,18 @@ class Data:
           affiliation = " ".join([w for w in affiliation.split() if not w in stopword])
           self.authorAffiliation[aid] = affiliation
 
-    if not os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "wb") as f:
+    if not os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "wb") as f:
         pickle.dump(self.authorAffiliation, f)
 
 
   @runtime
-  def readPaper(self, csvFile='Paper.csv', pickleFile='._paper.dat'):
+  def readPaper(self, csvFile='Paper.csv', pickleFile='paper.dat'):
     """
     PaperId, Title, Year, ConferenceId, JournalId, Keywords
     """
-    if os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "rb") as f:
+    if os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "rb") as f:
         self.paperTitle      = pickle.load(f)
         self.paperYear       = pickle.load(f)
         self.paperConference = pickle.load(f)
@@ -271,8 +282,8 @@ class Data:
           keywords = " ".join([w for w in keywords.split() if not w in stopword])
           self.paperKeywords[pid] = keywords
 
-    if not os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "wb") as f:
+    if not os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "wb") as f:
         pickle.dump(self.paperTitle, f)
         pickle.dump(self.paperYear, f)
         pickle.dump(self.paperConference, f)
@@ -280,12 +291,12 @@ class Data:
         pickle.dump(self.paperKeywords, f)
 
   @runtime
-  def readConference(self, csvFile='Conference.csv', pickleFile='._conference.dat'):
+  def readConference(self, csvFile='Conference.csv', pickleFile='conference.dat'):
     """
     ConferenceId, FullName
     """
-    if os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "rb") as f:
+    if os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "rb") as f:
         self.conferenceName = pickle.load(f)
 
         print ' # Load %s instead of parsing %s' % (pickleFile, csvFile)
@@ -309,19 +320,19 @@ class Data:
           full = " ".join([w for w in full.split() if not w in stopwordConference])
           self.conferenceName[cid] = full
 
-    if not os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "wb") as f:
+    if not os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "wb") as f:
         pickle.dump(self.conferenceName, f)
 
 
   # FIXME: Can be handled as a sing field with conference
   @runtime
-  def readJournal(self, csvFile='Journal.csv', pickleFile='._journal.dat'):
+  def readJournal(self, csvFile='Journal.csv', pickleFile='journal.dat'):
     """
     JournalId, FullName
     """
-    if os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "rb") as f:
+    if os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "rb") as f:
         self.journalName = pickle.load(f)
 
         print ' # Load %s instead of parsing %s' % (pickleFile, csvFile)
@@ -345,18 +356,18 @@ class Data:
           full = " ".join([w for w in full.split() if not w in stopwordJournal])
           self.journalName[jid] = full
 
-    if not os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "wb") as f:
+    if not os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "wb") as f:
         pickle.dump(self.journalName, f)
 
 
   @runtime
-  def readPaperAuthor(self, csvFile='PaperAuthor.csv', pickleFile='._paperauthor.dat'):
+  def readPaperAuthor(self, csvFile='PaperAuthor.csv', pickleFile='paperauthor.dat'):
     """
     PaperId, AuthorId
     """
-    if os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "rb") as f:
+    if os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "rb") as f:
         self.paperCoAuthors     = pickle.load(f)
         self.authorPublications = pickle.load(f)
         self.authorConfCount    = pickle.load(f)
@@ -405,8 +416,8 @@ class Data:
             else:
               self.authorJourCount[aid][jid] += 1
 
-    if not os.path.isfile(self.dataDir + pickleFile):
-      with open(self.dataDir + pickleFile, "wb") as f:
+    if not os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, "wb") as f:
         pickle.dump(self.paperCoAuthors, f)
         pickle.dump(self.authorPublications, f)
         pickle.dump(self.authorConfCount, f)
@@ -414,12 +425,12 @@ class Data:
 
 
   @runtime
-  def readTrain(self, csvFile='Train.csv', pickleFile='._train.dat'):
+  def readTrain(self, csvFile='Train.csv', pickleFile='train.dat'):
     with open(self.dataDir + csvFile, 'rb') as csvFile:
       reader = csv.reader(csvFile)
       reader.next()  # pass column name
 
-      with open(self.dataDir + 'preprocess.csv', 'wb') as csvOut:
+      with open(self.resultDir + 'preprocess.csv.' + self.currentTime, 'wb') as csvOut:
         writer = csv.writer(csvOut, delimiter=',')
         writer.writerow(['AuthorId','PaperId','AffiliationSimilarity','ConferenceCountSimilairty', \
                          'JournalCountSimilairty','TitleSimilairty','PublishSimilarity','KeywordSimilairty','mark'])
@@ -434,7 +445,7 @@ class Data:
 
           for pid in confirmed:
             pid = int(pid)
-            print '[+]', aid, pid, '+'
+            #print '[+]', aid, pid, '+'
             coauthorInfo = self.getCoAuthorsInfo(aid, pid)
             authorSimilarity = coauthorCmp(authorInfo, coauthorInfo)
 
@@ -445,7 +456,7 @@ class Data:
             
           for pid in deleted:
             pid = int(pid)
-            print '[+]', aid, pid, '-'
+            #print '[+]', aid, pid, '-'
             coauthorInfo = self.getCoAuthorsInfo(aid, pid)
             authorSimilairty = coauthorCmp(authorInfo, coauthorInfo)
 
@@ -456,12 +467,12 @@ class Data:
 
 
   @runtime
-  def readValid(self, csvFile='Valid.csv', pickleFile='._valid.dat'):
+  def readValid(self, csvFile='Valid.csv', pickleFile='valid.dat'):
     with open(self.dataDir + csvFile, 'rb') as csvFile:
       reader = csv.reader(csvFile)
       reader.next()  # pass column name
 
-      with open(self.dataDir + 'valid_preprocess.csv', 'wb') as csvOut:
+      with open(self.resultDir + 'valid_preprocess.csv.' + self.currentTime, 'wb') as csvOut:
         writer = csv.writer(csvOut, delimiter=',')
         writer.writerow(['AuthorId','PaperId','AffiliationSimilarity','ConferenceCountSimilairty', \
                          'JournalCountSimilairty','TitleSimilairty','PublishSimilarity','KeywordSimilairty','mark'])
@@ -475,7 +486,7 @@ class Data:
 
           for pid in pids:
             pid = int(pid)
-            print '[+]', aid, pid, '?'
+            #print '[+]', aid, pid, '?'
             coauthorInfo = self.getCoAuthorsInfo(aid, pid)
             authorSimilarity = coauthorCmp(authorInfo, coauthorInfo)
 
@@ -483,6 +494,36 @@ class Data:
             paperSimilarity = publicationCmp(paperInfo, publicationInfo)
 
             writer.writerow([aid, pid] + authorSimilarity + paperSimilarity + [0,])
+
+
+  @runtime
+  def readValidSolution(self, csvFile='ValidSolution.csv', pickleFile='validsolution.dat'):
+    with open(self.dataDir + csvFile, 'rb') as csvFile:
+      reader = csv.reader(csvFile)
+      reader.next()  # pass column name
+
+      with open(self.resultDir + 'validsolution_preprocess.csv.' + self.currentTime, 'wb') as csvOut:
+        writer = csv.writer(csvOut, delimiter=',')
+        writer.writerow(['AuthorId','PaperId','AffiliationSimilarity','ConferenceCountSimilairty', \
+                         'JournalCountSimilairty','TitleSimilairty','PublishSimilarity','KeywordSimilairty','mark'])
+
+        for row in reader:
+          aid = int(row[0])
+          pids = row[1].split()
+
+          authorInfo = self.getAuthorInfo(aid)
+          publicationInfo = self.getPublicationsInfo(aid)
+
+          for pid in pids:
+            pid = int(pid)
+            #print '[+]', aid, pid, '+'
+            coauthorInfo = self.getCoAuthorsInfo(aid, pid)
+            authorSimilarity = coauthorCmp(authorInfo, coauthorInfo)
+
+            paperInfo = self.getPaperInfo(pid)
+            paperSimilarity = publicationCmp(paperInfo, publicationInfo)
+
+            writer.writerow([aid, pid] + authorSimilarity + paperSimilarity + [1,])
 
 
   def getAuthorInfo(self, aid):
@@ -580,10 +621,25 @@ def main():
   data.readPaperAuthor()
 
   print '[*] Start to read Train.csv'
-  data.readTrain()
+  #data.readTrain()
+  thread = threading.Thread(target=data.readTrain)
+  thread.start()
+  threads.append(thread)
 
   print '[*] Start to read Valid.csv'
-  data.readValid()
+  #data.readValid()
+  thread = threading.Thread(target=data.readValid)
+  thread.start()
+  threads.append(thread)
+
+  print '[*] Start to read ValidSolution.csv'
+  #data.readValidSolution()
+  thread = threading.Thread(target=data.readValidSolution)
+  thread.start()
+  threads.append(thread)
+
+  for thread in threads:
+    thread.join()
 
 if __name__ == "__main__":
   main()
