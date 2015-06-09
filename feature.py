@@ -1,7 +1,9 @@
 import csv, os, datetime
-import re, math, operator, jellyfish
+import re, math, operator
+import collections, pickle
+
+import jellyfish
 from nltk.corpus import stopwords
-import threading, pickle
 
 import time
 def runtime(function):
@@ -23,12 +25,19 @@ def charFilter(string):
 
 def euclidean_distance(p, q):
   """
-  Ignore unmatched dimension
+  Return distance between two points
   """
   distance = 0
   for d in p:
     if d in q:
-      distance += (p[d] - q[d]) ** 2
+      distance += (p[d] - q[d]) ** 2  # Both
+    else:
+      distance += p[d] ** 2           # p only
+
+  for d in q:
+    if d not in p:
+      distance += q[d] ** 2           # q only
+
   return math.sqrt(distance)
 
 
@@ -42,61 +51,56 @@ def authorCmp(author1, author2):
 
   return (countDistance,)
 
+
 def coauthorCmp(author, coauthors):
   """
   Return mean of distance between each co-author
   """
   num = len(author)
   mean = [0.0 for i in range(0, num)]
-  cnt  = [0 for i in range(0, num)]
+  cnt = len(coauthors)
 
   for coauthor in coauthors:
     ret = authorCmp(author, coauthor)
     mean = map(operator.add, mean, ret)
 
-    for i in range(0, num):
-      if ret[i] > 0:
-        cnt[i] += 1
+  if cnt > 0:
+    return [mean[i] / cnt for i in range(0, num)]
+  else:
+    return mean
 
-  return [mean[i] / cnt[i] if cnt[i] > 0 else 0 for i in range(0, num)]
+
+def stringDistance(str1, str2):
+  """
+  Return distance between two strings
+    String distance : jaro + levenshtein + damerau
+  """
+  distance = 0
+  if len(str1) > 0 and len(str2) > 0:
+    str1 = str1.decode('utf-8')
+    str2 = str2.decode('utf-8')
+
+    jaro = jellyfish.jaro_distance(str1, str2)
+    leven = jellyfish.levenshtein_distance(str1, str2)
+    damerau = jellyfish.damerau_levenshtein_distance(str1, str2)
+
+    norm = max(len(str1), len(str2))
+    distance = 0.5 * jaro + 0.25 * (1 - leven / norm)   \
+                          + 0.25 * (1 - damerau / norm)
+
+  return distance
 
 
 def paperCmp(paper1, paper2):
   """
   Return paper similarity. Called by publicationCmp
-    Title    : jaro + levenshtein + damerau
-    Publish  : jaro + levenshtein + damerau
   """
-  titleDistance = 0
-  publishDistance = 0
 
-  # Title Distance
-  if len(paper1[0]) > 0 and len(paper2[0]) > 0:
-    title1 = paper1[0].decode('utf-8')
-    title2 = paper2[0].decode('utf-8')
-
-    jaro = jellyfish.jaro_distance(title1, title2)
-    leven = jellyfish.levenshtein_distance(title1, title2)
-    damerau = jellyfish.damerau_levenshtein_distance(title1, title2)
-
-    norm = max(len(title1), len(title2))
-    titleDistance = 0.5 * jaro + 0.25 * (1 - leven / norm)   \
-                               + 0.25 * (1 - damerau / norm)
-
-  # publish Distance
-  if len(paper1[1]) > 0 and len(paper2[1]) > 0:
-    publish1 = paper1[1].decode('utf-8')
-    publish2 = paper2[1].decode('utf-8')
-
-    jaro = jellyfish.jaro_distance(publish1, publish2)
-    leven = jellyfish.levenshtein_distance(publish1, publish2)
-    damerau = jellyfish.damerau_levenshtein_distance(publish1, publish2)
-
-    norm = max(len(publish1), len(publish2))
-    publishDistance = 0.5 * jaro + 0.25 * (1 - leven / norm)   \
-                                 + 0.25 * (1 - damerau / norm)
+  titleDistance   = stringDistance(paper1[0], paper2[0])
+  publishDistance = stringDistance(paper1[1], paper2[1])
 
   return (titleDistance, publishDistance)
+
 
 def publicationCmp(paper, publications):
   """
@@ -104,18 +108,19 @@ def publicationCmp(paper, publications):
   """
   num = len(paper)
   mean = [0.0 for i in range(0, num)]
-  cnt  = [0 for i in range(0, num)]
+  cnt = len(publications)
 
   for publication in publications:
     ret = paperCmp(paper, publication)
     mean = map(operator.add, mean, ret)
 
-    for i in range(0, num):
-      if ret[i] > 0:
-        cnt[i] += 1
+  if cnt > 0:
+    return [mean[i] / cnt for i in range(0, num)]
+  else:
+    return mean
 
-  return [mean[i] / cnt[i] if cnt[i] > 0 else 0 for i in range(0, num)]
-
+def ddInt():
+  return collections.defaultdict(int)
 
 class Data:
   def __init__ (self, runDir):
@@ -132,37 +137,47 @@ class Data:
     if not os.path.exists(self.resultDir):
       os.makedirs(self.resultDir)
 
+    # Author.csv
+    self.authorAffiliation = collections.defaultdict(str)  # authorId -> authorAffiliation
+
     # Paper.csv
-    self.paperTitle   = {}  # paperId -> paperTitle
-    self.paperYear    = {}  # paperId -> paperYear
-    self.paperPublish = {}  # paperId -> conferenceId/journalId
+    self.paperTitle   = collections.defaultdict(str)  # paperId -> paperTitle
+    self.paperYear    = collections.defaultdict(int)  # paperId -> paperYear
+    self.paperPublish = {}                            # paperId -> conferenceId/journalId
 
     # Conferene.csv, Journal.csv
     self.publishName = {}  # conferenceId/journalId -> conferenceName/journalName
     self.journalPad  = 0   # max(conferenceId)
 
     # PaperAuthor.csv
-    self.paperCoAuthors     = {}  # paperId -> authorIds
-    self.authorPublications = {}  # authorId -> paperIds
-    self.authorPublishCount = {}  # authorId, conferenceId/journalId -> # papers
+    self.paperCoAuthors     = collections.defaultdict(dict)  # paperId -> authorIds
+    self.authorPublications = collections.defaultdict(dict)  # authorId -> paperIds
+    self.authorPublishCount = collections.defaultdict(ddInt)  # authorId, conferenceId/journalId -> # papers
 
     # Train.csv
-    self.confirmed = {}
-    self.deleted  = {}
+    self.confirmed  = collections.defaultdict(list)  # authorId -> confirmedPaperIds
+    self.deleted    = collections.defaultdict(list)  # authorId -> deletedPaperIds
+    self.trainYear  = collections.defaultdict(int)    # authorId -> mean of confirmed paperYear
+    self.trainCount = collections.defaultdict(ddInt)  # authorId, conferenceId/journalId -> # confirmed papers
+
+    # Test.csv
+    self.unknown = collections.defaultdict(list)  # authorId -> unknown paperIds
 
     self.minYear = 1900
     self.maxYear = 2013
 
+
   @runtime
-  def readPaper(self, csvFile='Paper.csv', pickleFile='paper.dat'):
+  def readAuthor(self, csvFile='Author.csv', pickleFile='author.dat'):
     """
-    PaperId, Title, Year, ConferenceId, JournalId, Keywords
+    AuthorId, Affiliation
     """
     if os.path.isfile(self.pickleDir + pickleFile):
       with open(self.pickleDir + pickleFile, 'rb') as f:
-        self.paperTitle      = pickle.load(f)
-        self.paperYear       = pickle.load(f)
-        self.paperPublish    = pickle.load(f)
+        pickleAffiliation = pickle.load(f)
+
+        for k,v in pickleAffiliation.iteritems():
+          self.authorAffiliation[k] = v
 
         print ' # Load %s instead of parsing %s' % (pickleFile, csvFile)
         return
@@ -172,13 +187,49 @@ class Data:
       reader.next()  # pass column name
 
       for row in reader:
-        pid      = int(row[0])
-        title    = row[1].lower()
-        year     = int(row[2])
-        cid      = int(row[3])
-        jid      = int(row[4])
+        aid = int(row[0])
+        aff = row[2].lower()
+
+        if len(aff) > 0:
+          aff = charFilter(aff)
+          aff = " ".join([w for w in aff.split() if not w in self.stopword])
+          self.authorAffiliation[aid] = aff
+
+    with open(self.pickleDir + pickleFile, 'wb') as f:
+      pickle.dump(self.authorAffiliation, f)
 
 
+  @runtime
+  def readPaper(self, csvFile='Paper.csv', pickleFile='paper.dat'):
+    """
+    PaperId, Title, Year, ConferenceId, JournalId, Keywords
+    """
+    if os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile, 'rb') as f:
+        pickleTitle       = pickle.load(f)
+        pickleYear        = pickle.load(f)
+        self.paperPublish = pickle.load(f)
+
+        for k,v in pickleTitle.iteritems():
+          self.paperTitle[k] = v
+        for k,v in pickleYear.iteritems():
+          self.paperYear[k] = v
+
+        print ' # Load %s instead of parsing %s' % (pickleFile, csvFile)
+        return
+
+    with open(self.dataDir + csvFile, 'rb') as csvFile:
+      reader = csv.reader(csvFile)
+      reader.next()  # pass column name
+
+      for row in reader:
+        pid   = int(row[0])
+        title = row[1].lower()
+        year  = int(row[2])
+        cid   = int(row[3])
+        jid   = int(row[4])
+
+        # Remove error
         if year < self.minYear:
           self.paperYear[pid] = 0
         elif year > self.maxYear:
@@ -186,11 +237,13 @@ class Data:
         else:
           self.paperYear[pid] = (year - self.minYear) / float(self.maxYear - self.minYear)
 
+        # Merge conference and journal
         if cid > 0:
           self.paperPublish[pid] = cid
         elif jid > 0:
           self.paperPublish[pid] = jid + self.journalPad
 
+        # Remove high-frequency words
         if len(title) > 0:
           title = charFilter(title)
           title = " ".join([w for w in title.split() if not w in self.stopword])
@@ -208,9 +261,12 @@ class Data:
     """
     if os.path.isfile(self.pickleDir + pickleFile):
       with open(self.pickleDir + pickleFile, 'rb') as f:
-        self.publishName = pickle.load(f)
+        pickeName = pickle.load(f)
         self.journalPad = pickle.load(f)
         self.journalPad = int(self.journalPad)
+
+        for k,v in pickeName.iteritems():
+          self.publishName[k] = v
 
         print ' # Load %s instead of parsing %s' % (pickleFile, csvFile)
         return
@@ -230,13 +286,13 @@ class Data:
         if cid > self.journalPad:
           self.journalPad = cid
 
+        # Remove high-frequency words
         if len(full) > 0:
           full = charFilter(full)
           full = " ".join([w for w in full.split() if not w in stopwordConference])
           self.publishName[cid] = full
 
 
-  # FIXME: Can be handled as a sing field with conference
   @runtime
   def readJournal(self, csvFile='Journal.csv', pickleFile='publish.dat'):
     """
@@ -258,6 +314,7 @@ class Data:
         jid  = int(row[0]) + self.journalPad
         full = row[2].lower()
 
+        # Remove high-frequency words
         if len(full) > 0:
           full = charFilter(full)
           full = " ".join([w for w in full.split() if not w in stopwordJournal])
@@ -275,9 +332,17 @@ class Data:
     """
     if os.path.isfile(self.pickleDir + pickleFile):
       with open(self.pickleDir + pickleFile, 'rb') as f:
-        self.paperCoAuthors     = pickle.load(f)
-        self.authorPublications = pickle.load(f)
-        self.authorPublishCount = pickle.load(f)
+        pickleCoAuthors    = pickle.load(f)
+        picklePublications = pickle.load(f)
+        picklePublishCount = pickle.load(f)
+
+        for k,v in pickleCoAuthors.iteritems():
+          self.paperCoAuthors[k] = v
+        for k,v in picklePublications.iteritems():
+          self.authorPublications[k] = v
+        for k,v in picklePublishCount.iteritems():
+          for kk,vv in v.iteritems():
+            self.authorPublishCount[k][kk] = vv
 
         print ' # Load %s instead of parsing %s' % (pickleFile, csvFile)
         return
@@ -289,29 +354,29 @@ class Data:
       for row in reader:
         pid = int(row[0])
         aid = int(row[1])
+        aff = row[3].lower()
+
+        # Affiliation
+        if len(aff) > 0:
+          aff = charFilter(aff)
+          aff = " ".join([w for w in aff.split() if not w in self.stopword])
+          if aid not in self.authorAffiliation:
+            self.authorAffiliation[aid] = aff
+          elif len(self.authorAffiliation[aid]) > len(aff):
+            pass
+          else:
+            self.authorAffiliation[aid] = aff
 
         # Co-authors
-        if pid not in self.paperCoAuthors:
-          self.paperCoAuthors[pid] = []
-        if aid not in self.paperCoAuthors[pid]:
-          self.paperCoAuthors[pid].append(aid)
+        self.paperCoAuthors[pid][aid] = 1
 
         # Author's publications
-        if aid not in self.authorPublications:
-          self.authorPublications[aid] = []
-        if pid not in self.authorPublications[aid]:
-          self.authorPublications[aid].append(pid)
+        self.authorPublications[aid][pid] = 1
 
         # Count the number of papers published to conference / journal
-        if aid not in self.authorPublishCount:
-          self.authorPublishCount[aid] = {}
-
-        # Count
         for pid in self.authorPublications[aid]:
           if pid in self.paperPublish:
             cid = self.paperPublish[pid]
-            if cid not in self.authorPublishCount[aid]:
-              self.authorPublishCount[aid][cid] = 0
             self.authorPublishCount[aid][cid] += 1
 
         # Normalize
@@ -326,7 +391,6 @@ class Data:
               self.authorPublishCount[aid][cid] -= minCount
               self.authorPublishCount[aid][cid] /= float(maxCount - minCount)
 
-
     with open(self.pickleDir + pickleFile, 'wb') as f:
       pickle.dump(self.paperCoAuthors, f)
       pickle.dump(self.authorPublications, f)
@@ -334,13 +398,13 @@ class Data:
 
 
   @runtime
-  #def readTrain(self, csvFile='Test.csv', pickleFile='test.dat', refresh=0):
-  #def readTrain(self, csvFile='Train+Valid.csv', pickleFile='train_valid.dat', refresh=0):
-  def readTrain(self, csvFile='Train.csv', pickleFile='train.dat', refresh=0):
+  def readTrain(self, csvFile='Train.csv', pickleFile='train.dat', outFile='preprocess.csv', refresh=0):
     if os.path.isfile(self.pickleDir + pickleFile) and refresh is 0:
       with open(self.pickleDir + pickleFile, 'rb') as f:
         self.confirmed = pickle.load(f)
         self.deleted   = pickle.load(f)
+        self.trainYear  = pickle.load(f)
+        self.trainCount = pickle.load(f)
 
         print ' # Load %s instead of parsing %s' % (pickleFile, csvFile)
         return
@@ -349,26 +413,22 @@ class Data:
       reader = csv.reader(csvFile)
       reader.next()  # pass column name
 
-      with open(self.resultDir + 'preprocess.csv.' + self.currentTime, 'wb') as csvOut:
+      with open(self.resultDir + outFile + '.' + self.currentTime, 'wb') as csvOut:
         writer = csv.writer(csvOut, delimiter=',')
         writer.writerow(['AuthorId','PaperId','PaperYear','PublishCount', \
                          'PaperTitle','Publish','mark'])
 
         for row in reader:
-          aid = int(row[0])
-          confirmed = row[1].split()
-          deleted  = row[2].split()
-
-          if aid not in self.confirmed:
-            self.confirmed[aid] = []
-          if aid not in self.deleted:
-            self.deleted[aid] = []
+          if len(row) < 3:
+            continue
+          aid       = int(row[0])
+          confirmed = map(int, set(row[1].split()))
+          deleted   = map(int, set(row[2].split()))
 
           authorInfo = self.getAuthorInfo(aid)
           publicationInfo = self.getPublicationsInfo(aid)
 
           for pid in confirmed:
-            pid = int(pid)
             self.confirmed[aid].append(pid)
 
             coauthorInfo = self.getCoAuthorsInfo(aid, pid)
@@ -377,15 +437,23 @@ class Data:
             paperInfo = self.getPaperInfo(pid)
             paperSimilarity = publicationCmp(paperInfo, publicationInfo)
 
-            if pid in self.paperYear:
-              yearNorm = self.paperYear[pid]
-            else:
-              yearNorm = 0
-              
             writer.writerow([aid, pid, yearNorm] + authorSimilarity + paperSimilarity + [1,])
 
+            # for testing
+            if pid in self.paperYear:
+              yearNorm = self.paperYear[pid]  # prevent auto-creation of pid
+            else:
+              yearNorm = 0
+
+            if pid in self.paperPublish:
+              cid = self.paperPublish[pid]
+              self.trainCount[aid][cid] += 1
+
+            self.trainYear[aid] += yearNorm
+
+          self.trainYear[aid] /= float(len(confirmed))
+
           for pid in deleted:
-            pid = int(pid)
             self.deleted[aid].append(pid)
 
             coauthorInfo = self.getCoAuthorsInfo(aid, pid)
@@ -395,7 +463,7 @@ class Data:
             paperSimilarity = publicationCmp(paperInfo, publicationInfo)
 
             if pid in self.paperYear:
-              yearNorm = self.paperYear[pid]
+              yearNorm = self.paperYear[pid]  # prevent auto-creation of pid
             else:
               yearNorm = 0
               
@@ -404,10 +472,13 @@ class Data:
     with open(self.pickleDir + pickleFile, 'wb') as f:
       pickle.dump(self.confirmed, f)
       pickle.dump(self.deleted, f)
+      pickle.dump(self.trainYear, f)
+      pickle.dump(self.trainCount, f)
 
 
   @runtime
-  def readTest(self, csvFile='Test.csv', pickleFile='test.dat', refresh=0):
+  def readTest(self, csvFile='Test.csv', pickleFile='test.dat', outFile='preprocess_test.csv', refresh=1):
+    print csvFile, pickleFile, outFile, refresh
     if os.path.isfile(self.pickleDir + pickleFile) and refresh is 0:
       with open(self.pickleDir + pickleFile, 'rb') as f:
         self.unknown = pickle.load(f)
@@ -419,23 +490,19 @@ class Data:
       reader = csv.reader(csvFile)
       reader.next()  # pass column name
 
-      with open(self.resultDir + 'preprocess_test.csv.' + self.currentTime, 'wb') as csvOut:
+      with open(self.resultDir + outFile + '.' + self.currentTime, 'wb') as csvOut:
         writer = csv.writer(csvOut, delimiter=',')
         writer.writerow(['AuthorId','PaperId','PaperYear','PublishCount', \
                          'PaperTitle','Publish','mark'])
 
         for row in reader:
-          aid = int(row[0])
-          unknown = row[1].split()
-
-          if aid not in self.unknown:
-            self.unknown[aid] = []
+          aid     = int(row[0])
+          unknown = map(int, set(row[1].split()))
 
           authorInfo = self.getAuthorInfo(aid)
           publicationInfo = self.getPublicationsInfo(aid)
 
           for pid in unknown:
-            pid = int(pid)
             self.unknown[aid].append(pid)
 
             coauthorInfo = self.getCoAuthorsInfo(aid, pid)
@@ -456,65 +523,76 @@ class Data:
 
 
   @runtime
-  def readTest_(self, csvFile='Test.csv', pickleFile='test.dat', outFile='test_preprocess.csv'):
+  def readTestFull(self, csvFile='Test.csv', pickleFile='testfull.dat', outFile='preprocess_testfull.csv'):
     with open(self.dataDir + csvFile, 'rb') as csvFile:
       reader = csv.reader(csvFile)
       reader.next()
 
-      learned = [i for i in self.confirmed]
-      tmp     = [i for i in self.deleted]
-
-      for tid in tmp:
-        if tid not in learned:
-          learned.append(tid)
-
-      with open(self.resultDir + outFile, 'wb') as csvOut:
+      with open(self.resultDir + outFile + '.' + self.currentTime, 'wb') as csvOut:
         writer = csv.writer(csvOut, delimiter=',')
         writer.writerow(['AuthorId','PaperId','KnonwAuthorId','Similarity'])
 
+        # Localize for performance
+        paperYear = self.paperYear
+        learned = self.confirmed
+        trainYear = self.trainYear
+        trainCount = self.trainCount
+        paperPublish = self.paperPublish
+
+        neighbority   = {}
+        neighborYear  = {}
+        neighborCount = {}
+
         for row in reader:
           aid  = int(row[0])
-          pids = row[1].split()
+          pids = map(int, set(row[1].split()))
 
-          writemap = {}
+          # unknown
+          naff = self.authorAffiliation[aid]
+          nyear = 0
+          ncount = collections.defaultdict(int)
+          for pid in pids:
+            if pid in paperPublish:
+              cid = paperPublish[pid]
+              ncount[cid] += 1
+            nyear += paperYear[pid]
+          nyear /= float(len(pids))
 
-          authorInfo = self.getAuthorInfo(aid)
-          #if aid not in self.authorYearNorm:
-          #  self.authorYearNorm[aid] = {}
-
-          #for caid in self.confirmed:
-
+          # learned
           for caid in learned:
-            caid = int(caid)
-
-            coauthorInfo = [self.getAuthorInfo(caid),]
-            authorSimilarity = coauthorCmp(authorInfo, coauthorInfo)
-
-            publicationInfo = self.getPublicationsInfo(caid) # Use error data set also
-
-            for pid in pids:
-              pid = int(pid)
-
-              if pid not in writemap:
-                writemap[pid] = []
-
-              paperInfo = self.getPaperInfo(pid)
-              if pid in self.paperYear:
-                yearNorm = self.paperYear[pid]
+            caff = self.authorAffiliation[caid]
+            yearDistance = math.sqrt((trainYear[caid] - nyear) ** 2)
+            countDistance = 0
+            for cid in ncount:
+              if cid in trainCount[caid]:
+                countDistance += (ncount[cid] - trainCount[caid][cid]) ** 2
               else:
-                yearNorm = 0
-                
-              paperSimilarity = publicationCmp(paperInfo, publicationInfo)
+                countDistance += ncount[cid] ** 2
+            for cid in trainCount[caid]:
+              if cid not in ncount:
+                countDistance += trainCount[caid][cid] ** 2
+            countDistance = math.sqrt(countDistance)
 
-              #comparePool.append([aid, year] + authorSimilarity + paperSimilarity)
-              tmp = [caid, yearNorm] + authorSimilarity + paperSimilarity
-              writemap[pid].append(tmp)
-              #writemap[pid].append([caid, yearNorm] + authorSimilarity + paperSimilarity)
+            neighbority[caid]   = 0.33 * stringDistance(naff, caff)
+            neighborYear[caid]  = yearDistance
+            neighborCount[caid] = countDistance
 
-          for pid in writemap:
-            writer.writerow([aid, pid] + writemap[pid])
+          # Find 5 nearest neighbors
+          max_year  = max(neighborYear.iteritems(),  key=operator.itemgetter(1))[1]
+          max_count = max(neighborCount.iteritems(), key=operator.itemgetter(1))[1]
+          for caid in neighborYear:
+            neighbority[caid] += 0.33 * neighborYear[caid] / max_year + 0.33 * neighborCount[caid] / max_count
 
-          print aid, 'IS DONE. GO TO NEXT'
+          nearestList = []
+          for i in range(5):
+            try:
+              nearest = max(neighbority.iteritems(), key=operator.itemgetter(1))
+              nearestList.extend([nearest[0], nearest[1]])
+              neighbority.pop(nearest[0])
+            except ValueError:
+              break
+
+          writer.writerow([aid,] + nearestList)
 
 
   def getAuthorInfo(self, aid):
@@ -523,16 +601,16 @@ class Data:
     """
     return (self.authorPublishCount[aid],)
 
+
   def getCoAuthorsInfo(self, author, paper):
     """
     Return list of co-author information
     """
     coauthorsInfo = []
 
-    if paper in self.paperCoAuthors:
-      for coauthor in self.paperCoAuthors[paper]:
-        if author != coauthor:
-          coauthorsInfo.append(self.getAuthorInfo(coauthor))
+    for coauthor in self.paperCoAuthors[paper]:
+      if author != coauthor:
+        coauthorsInfo.append(self.getAuthorInfo(coauthor))
 
     return coauthorsInfo
     
@@ -541,18 +619,15 @@ class Data:
     """
     Return author's publication information. Called by getPublicationsInfo
     """
-    title   = ""
     publish = ""
-
-    if pid in self.paperTitle:
-      title = self.paperTitle[pid]
+    title = self.paperTitle[pid]
 
     if pid in self.paperPublish:
       cid = self.paperPublish[pid]
-      if cid in self.publishName:
-        publish = self.publishName[cid]
+      publish = self.publishName[cid]
 
     return (title, publish)
+
 
   def getPublicationsInfo(self, author):
     """
@@ -567,8 +642,21 @@ class Data:
     return publicationInfo
 
 
+  def TrainTestClear(self):
+    self.confirmed  = collections.defaultdict(list)
+    self.deleted    = collections.defaultdict(list)
+    self.trainYear  = collections.defaultdict(int)
+    self.trainCount = collections.defaultdict(ddInt)
+    self.unknown    = collections.defaultdict(list)
+# --- class Data
+
+
 def main():
   data = Data(os.getcwd())
+
+  # Parse given data
+  print '[*] Start to read Author.csv'
+  data.readAuthor()
 
   print '[*] Start to read Conference.csv'
   data.readConference()
@@ -582,11 +670,20 @@ def main():
   print '[*] Start to read PaperAuthor.csv'
   data.readPaperAuthor()
 
+  # Preprocessing
   print '[*] Start to read Train.csv'
   data.readTrain()
 
-  #print '[*] Start to read Test.csv'
-  #data.readTest()
+  #print '[*] Start to read Valid.csv'
+  #data.readTestFull('Valid.csv','valid.dat','preprocess_valid.csv')
+
+  #data.TrainTestClear()
+
+  #print '[*] Start to read Train+Valid.csv'
+  #data.readTrain('Train+Valid.csv','train_valid.dat','preprocess_train+valid.csv')
+
+  print '[*] Start to read Test.csv'
+  data.readTestFull()
 
 if __name__ == "__main__":
   main()
