@@ -24,7 +24,7 @@ def main():
   argc = len(sys.argv)
 
   if argc is 2:
-    print 'Usage:'
+    print 'Usage: csv1 csv2 merged'
     return
 
   mergedCsv = sys.argv[argc - 1]

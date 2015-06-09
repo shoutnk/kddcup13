@@ -3,8 +3,8 @@ import pickle
 
 class Data:
   def __init__ (self, runDir):
-    self.dataDir = runDir + '/original_data/'
-    self.pickleDir = runDir + '/pickles/'
+    self.dataDir = runDir + '/test/'
+    self.pickleDir = runDir + '/test/pickles/'
 
     if not os.path.exists(self.dataDir):
       os.makedirs(self.dataDir)
@@ -16,7 +16,7 @@ class Data:
 
 
   def readValidSolution(self, csvFile   ='ValidSolution.csv' \
-                            , pickleFile='validsolution.dat'):
+                            , pickleFile='validsolution_.dat'):
 
     if os.path.isfile(self.pickleDir + pickleFile):
       with open(self.pickleDir + pickleFile) as f:
@@ -47,15 +47,15 @@ class Data:
 
         #self.usages[aid] = usage
 
-    with open(self.pickleDir + 'validsolution.dat', 'wb') as f:
+    with open(self.pickleDir + 'validsolution_.dat', 'wb') as f:
       pickle.dump(self.confirmed, f)
       #pickle.dump(self.usages, f)
 
 
-  def readValid(self, csvFile='Valid.csv', pickleFile='valid.dat'):
+  def readValid(self, csvFile='Valid.csv', pickleFile='valid_.dat'):
 
-    if os.path.isfile(self.pickleDir + 'valid.dat'):
-      with open(self.pickleDir + 'valid.dat') as f:
+    if os.path.isfile(self.pickleDir + pickleFile):
+      with open(self.pickleDir + pickleFile) as f:
         self.deleted = pickle.load(f)
 
         print ' # Load %s instead of parsing %s' % (pickleFile, csvFile)
@@ -80,7 +80,7 @@ class Data:
              or pid not in self.confirmed[aid] and pid not in self.deleted[aid]:
             self.deleted[aid].append(pid)
 
-    with open(self.pickleDir + 'valid.dat', 'wb') as f:
+    with open(self.pickleDir + 'valid_.dat', 'wb') as f:
       pickle.dump(self.deleted, f)
 
 
