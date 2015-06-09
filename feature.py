@@ -146,7 +146,7 @@ class Data:
     self.paperPublish = {}                            # paperId -> conferenceId/journalId
 
     # Conferene.csv, Journal.csv
-    self.publishName = {}  # conferenceId/journalId -> conferenceName/journalName
+    self.publishName = collections.defaultdict(str)  # conferenceId/journalId -> conferenceName/journalName
     self.journalPad  = 0   # max(conferenceId)
 
     # PaperAuthor.csv
@@ -429,16 +429,6 @@ class Data:
           publicationInfo = self.getPublicationsInfo(aid)
 
           for pid in confirmed:
-            self.confirmed[aid].append(pid)
-
-            coauthorInfo = self.getCoAuthorsInfo(aid, pid)
-            authorSimilarity = coauthorCmp(authorInfo, coauthorInfo)
-
-            paperInfo = self.getPaperInfo(pid)
-            paperSimilarity = publicationCmp(paperInfo, publicationInfo)
-
-            writer.writerow([aid, pid, yearNorm] + authorSimilarity + paperSimilarity + [1,])
-
             # for testing
             if pid in self.paperYear:
               yearNorm = self.paperYear[pid]  # prevent auto-creation of pid
@@ -450,6 +440,17 @@ class Data:
               self.trainCount[aid][cid] += 1
 
             self.trainYear[aid] += yearNorm
+
+            # for training
+            self.confirmed[aid].append(pid)
+
+            coauthorInfo = self.getCoAuthorsInfo(aid, pid)
+            authorSimilarity = coauthorCmp(authorInfo, coauthorInfo)
+
+            paperInfo = self.getPaperInfo(pid)
+            paperSimilarity = publicationCmp(paperInfo, publicationInfo)
+
+            writer.writerow([aid, pid, yearNorm] + authorSimilarity + paperSimilarity + [1,])
 
           self.trainYear[aid] /= float(len(confirmed))
 
